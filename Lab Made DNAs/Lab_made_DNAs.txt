@@ -1,0 +1,5 @@
+pUC19[1] : pUC19 cloning vector
+pBR322[2] : Cloning vector pBR322, complete sequence
+pET-28a[3] : Cloning vector pET-28a-ZaTdT12-R335L-K337G, complete sequence
+pGEM-3Z[4] : Cloning vector pGEM-3Z
+pEGFP-C1 [5] : Cloning vector pEGFP-C1, complete sequence, enhanced green fluorescent protein (egfp) and neomycin phosphotransferase genes, complete cds
