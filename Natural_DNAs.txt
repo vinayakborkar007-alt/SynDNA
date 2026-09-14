@@ -1,8 +1,0 @@
-Salmonella enterica subsp. enterica serovar Typhimurium str. LT2, complete genome (1)
-[Bacillus subtilis] : Staphylococcus aureus subsp. aureus strain MRSA252, complete genome 2
-[Saccharomyces cerevisiae (Yeast)] : Blastobotrys adeninivorans LS3 genomic chromosome, Arad1D, whole genome shotgun sequence
- 3
-
-[Thermus aquaticus] : DNA sequence encoding Thermus aquaticus aqualysin 4
-
-[Bacteriophage T4 (A natural virus)] : Enterobacteria phage T4, complete genome 5
