@@ -1,6 +1,0 @@
-filename,sequence_id,length_bp,gc_content_pct,is_synthetic
-natural_1.fasta,NC_003197.2,4857450,52.22,0
-natural_2.fasta,BX571856.1,2902619,32.81,0
-natural_3.fasta,HG937694.1,4300524,48.06,0
-natural_4.fasta,E02962.1,2273,65.64,0
-natural_5.fasta,NC_000866.4,168903,35.3,0
