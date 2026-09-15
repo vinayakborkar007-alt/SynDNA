@@ -1,17 +1,14 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from schemas import PredictionRequest, PredictionResponse
 from parser import parse_fasta
+from pipeline import run_prediction
+
 
 app = FastAPI(
     title="SynDNA Guard API",
     description="Backend API for SynDNA",
     version="1.0.0"
 )
-
-
-class PredictionRequest(BaseModel):
-    sequence: str
-    host: str = "unknown"
 
 
 @app.get("/")
@@ -22,23 +19,21 @@ def root():
     }
 
 
-@app.post("/predict")
+@app.post("/predict", response_model=PredictionResponse)
 def predict(request: PredictionRequest):
 
     try:
+        # Parse and validate the FASTA/DNA input
         sequence = parse_fasta(request.sequence)
 
+        # Run prediction pipeline
+        result = run_prediction(sequence, request.host)
+
+        # Return prediction response
         return {
             "success": True,
             "sequence_length": len(sequence),
-            "anomaly_score": 0.78,
-            "classification": "High",
-            "suspicious_regions": [],
-            "feature_importance": {
-                "kmer": 0.42,
-                "cai": 0.31,
-                "gc_skew": 0.18
-            }
+            **result
         }
 
     except ValueError as e:
