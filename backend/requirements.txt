@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+biopython
+xgboost
+pandas
+numpy
