@@ -1,0 +1,1215 @@
+
+<!DOCTYPE html>
+<html lang="en" style="scroll-behavior: smooth;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SynDNA - Synthetic DNA Biosecurity</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Three.js (For the 3D Helix & Modal Viewer) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom Colors Configuration -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        background: '#000000',
+                        card: '#090d18',
+                        cardborder: '#1e293b',
+                        bioteal: '#00C7B7',
+                        dnablue: '#3B82F6',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: #000000; color: #ffffff; font-family: 'Inter', sans-serif; overflow-x: hidden; }
+
+        #webgl-canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; }
+        .vignette { position: fixed; inset: 0; background: radial-gradient(circle at center, transparent 10%, rgba(0, 0, 0, 0.95) 100%); z-index: 1; pointer-events: none; }
+
+        .glow-teal { text-shadow: 0 0 25px rgba(0, 199, 183, 0.6); }
+        .btn-glow:hover { box-shadow: 0 0 25px rgba(0, 199, 183, 0.4); }
+        .threat-glow { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); border-color: rgba(239, 68, 68, 0.5); }
+
+        .glass-panel, .glass-card {
+            background-color: rgba(9, 13, 24, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(30, 41, 59, 0.8);
+            border-radius: 12px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #050914; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+        /* DNA Track Styling */
+        .dna-track { background-color: #1e293b; height: 24px; border-radius: 6px; position: relative; overflow: hidden; width: 100%; }
+        .dna-flagged { position: absolute; height: 100%; left: 28%; width: 35%; background-color: rgba(239, 68, 68, 0.8); border-left: 2px solid #f87171; border-right: 2px solid #f87171; }
+
+        /* SPA Tab Switching Logic */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Nav Item Active State */
+        .nav-item { border-bottom: 2px solid transparent; }
+        .nav-item.active { color: #00C7B7; border-bottom: 2px solid #00C7B7; }
+
+        /* Tech Patterns */
+        .pattern-grid { background-image: linear-gradient(rgba(0, 199, 183, 0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 199, 183, 0.15) 1px, transparent 1px); background-size: 20px 20px; }
+        .pattern-dots { background-image: radial-gradient(rgba(59, 130, 246, 0.3) 1px, transparent 1px); background-size: 16px 16px; }
+        .pattern-red { background-image: linear-gradient(rgba(239, 68, 68, 0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(239, 68, 68, 0.15) 1px, transparent 1px); background-size: 20px 20px; }
+    </style>
+</head>
+<body class="relative flex flex-col min-h-screen">
+
+    <!-- Background 3D Canvas (Restored Original) -->
+    <canvas id="webgl-canvas"></canvas>
+    <div class="vignette"></div>
+
+    <!-- ============================================== -->
+    <!-- UNIFIED TOP NAVIGATION BAR                     -->
+    <!-- ============================================== -->
+    <header class="fixed top-0 left-0 w-full z-50 bg-black/80 backdrop-blur-md border-b border-zinc-800">
+        <div class="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
+            
+            <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('home')">
+                <i data-lucide="dna" class="text-bioteal w-7 h-7"></i>
+                <h1 class="text-xl font-bold tracking-tight text-white uppercase">Syn<span class="text-bioteal">DNA</span></h1>
+            </div>
+
+            <!-- Unified Nav Menu -->
+            <nav class="hidden lg:flex items-center gap-8 h-full">
+                <button onclick="switchTab('home')" id="nav-home" class="nav-item active h-full flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-white transition">
+                    Home
+                </button>
+                <button onclick="switchTab('analyze')" id="nav-analyze" class="nav-item h-full flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-white transition">
+                    Analyze
+                </button>
+                <button onclick="switchTab('history')" id="nav-history" class="nav-item h-full flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-white transition">
+                    History
+                </button>
+                <button onclick="switchTab('docs')" id="nav-docs" class="nav-item h-full flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-white transition">
+                    Guide
+                </button>
+                <button onclick="switchTab('about')" id="nav-about" class="nav-item h-full flex items-center gap-2 text-sm font-medium text-zinc-400 hover:text-white transition">
+                    About Us
+                </button>
+            </nav>
+
+            <div>
+                <a href="login.html" class="text-xs font-semibold uppercase tracking-wider px-6 py-2 border border-zinc-800 rounded-full hover:border-zinc-500 transition text-zinc-300 bg-zinc-900/50 hover:bg-zinc-800/50">
+                    Login
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- ============================================== -->
+    <!-- MAIN CONTENT CONTAINER                         -->
+    <!-- ============================================== -->
+    <main class="flex-1 w-full relative z-10 flex flex-col">
+
+        <!-- ============================================== -->
+        <!-- TAB: HOME (LANDING PAGE & STORY)               -->
+        <!-- ============================================== -->
+        <div id="tab-home" class="tab-content active flex-1">
+            
+            <!-- Hero Section -->
+            <div class="min-h-screen flex flex-col justify-center pt-20">
+                <div class="w-full max-w-4xl mx-auto px-6 text-center flex flex-col items-center">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-bioteal/30 bg-bioteal/10 text-bioteal text-xs font-mono mb-8 tracking-wide">
+                        <span class="w-2 h-2 rounded-full bg-bioteal animate-pulse"></span>
+                        ALIGNMENT-FREE BIOSECURITY SCREENING
+                    </div>
+                    <h1 class="text-4xl md:text-6xl font-bold tracking-tight leading-tight text-white mb-6">
+                        Detect engineered stealth DNA <br>
+                        <span class="text-transparent bg-clip-text bg-gradient-to-r from-bioteal to-dnablue glow-teal">
+                            without database matching.
+                        </span>
+                    </h1>
+                    <p class="text-base md:text-lg text-zinc-400 max-w-2xl mb-10 leading-relaxed font-light">
+                        Generative AI can create novel biological sequences with zero detectable homology. We evaluate the fingerprints of lab manipulation to catch what traditional tools miss.
+                    </p>
+                    <button onclick="switchTab('analyze')" class="btn-glow px-8 py-4 rounded-xl bg-bioteal hover:bg-[#00a89a] text-black font-semibold text-sm tracking-wide transition-all flex items-center gap-2 shadow-lg shadow-bioteal/20">
+                        <span>Launch Screener Dashboard</span>
+                        <i data-lucide="arrow-right" class="w-4 h-4 text-black"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- SECTION 1: FROM DIGITAL CODE TO BIOLOGICAL REALITY -->
+            <section class="w-full pt-16 pb-16 border-t border-zinc-800/50 bg-black/40">
+                <div class="max-w-6xl mx-auto px-6">
+                    
+                    <div class="text-center mb-20">
+                        <h2 class="text-3xl md:text-4xl font-bold mb-4">From Digital Code to Biological Reality</h2>
+                        <p class="text-zinc-400 max-w-2xl mx-auto">Before understanding the threat, we must understand how modern biotechnology has turned biology into an engineering discipline.</p>
+                    </div>
+
+                    <!-- Block 1: The Blueprint of Life -->
+                    <div class="flex flex-col md:flex-row items-center gap-12 mb-20 glass-panel p-8">
+                        <div class="w-full md:w-1/2">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-dnablue/20 flex items-center justify-center border border-dnablue/30">
+                                    <i data-lucide="dna" class="text-dnablue w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-white">The Blueprint of Life</h3>
+                            </div>
+                            <p class="text-zinc-300 leading-relaxed text-sm md:text-base">
+                                DNA is the fundamental instruction manual for all living organisms. Written in a four-letter chemical alphabet (A, T, C, G), this genetic code dictates how cells function. By altering this sequence, scientists can program cells to produce new medicines, biofuels, and materials. Biology is now treated as software that can be read, edited, and rewritten.
+                            </p>
+                        </div>
+                        <div class="w-full md:w-1/2">
+                            <img src="images.jpeg" alt="DNA Blueprint" class="rounded-xl border border-zinc-700 shadow-lg object-cover h-64 w-full">
+                        </div>
+                    </div>
+
+                    <!-- Block 2: Printing DNA in the Lab -->
+                    <div class="flex flex-col-reverse md:flex-row items-center gap-12 mb-20 glass-panel p-8">
+                        <div class="w-full md:w-1/2">
+                            <img src="dnaprinting750-1.jpg" alt="Lab Synthesis" class="rounded-xl border border-zinc-700 shadow-lg object-cover h-64 w-full">
+                        </div>
+                        <div class="w-full md:w-1/2">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-bioteal/20 flex items-center justify-center border border-bioteal/30">
+                                    <i data-lucide="cpu" class="text-bioteal w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-white">Printing DNA in the Lab</h3>
+                            </div>
+                            <p class="text-zinc-300 leading-relaxed text-sm md:text-base">
+                                Today, the creation of DNA is completely digitized. Researchers design custom sequences on their computers using standard text files (FASTA). This digital code is sent over the internet to a commercial synthesis facility. There, specialized machines act like 3D printers for biology—using chemical building blocks to synthesize the physical DNA molecule base by base, completely from scratch.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Block 3: The Threat -->
+                    <div class="flex flex-col md:flex-row items-center gap-12 glass-panel p-8 border-red-500/30 shadow-[0_0_30px_rgba(239,68,68,0.1)]">
+                        <div class="w-full md:w-1/2">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center border border-red-500/30">
+                                    <i data-lucide="shield-alert" class="text-red-400 w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-white">The Generative AI Loophole</h3>
+                            </div>
+                            <p class="text-zinc-300 leading-relaxed text-sm md:text-base mb-4">
+                                Because anyone can order custom DNA online, synthesis labs must screen orders to prevent the creation of dangerous pathogens. However, current biosecurity relies on <strong class="text-white">homology matching</strong>—comparing orders against a database of known harmful viruses.
+                            </p>
+                            <p class="text-red-300/80 leading-relaxed text-sm md:text-base font-medium border-l-2 border-red-500 pl-4">
+                                With Generative AI, bad actors can now invent completely novel, functional biological sequences. Because these sequences are brand new, they share zero detectable similarity with existing records, bypassing legacy screening completely undetected.
+                            </p>
+                        </div>
+                        <div class="w-full md:w-1/2">
+                            <div class="relative">
+                                <img src="images (1).jpeg" alt="AI Technology Threat" class="rounded-xl border border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.2)] object-cover h-64 w-full">
+                                <!-- Overlay Badge -->
+                                <div class="absolute bottom-4 left-4 bg-black/80 border border-red-500/50 backdrop-blur px-3 py-2 rounded-lg">
+                                    <span class="block text-red-400 font-mono text-sm font-bold">DATABASE MATCH: 0%</span>
+                                    <span class="block text-zinc-400 text-[10px] uppercase tracking-widest">Threat Undetected</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- SECTION 2: OUR AIM / PROACTIVE BIOSECURITY -->
+            <section class="w-full pt-20 pb-20 border-t border-zinc-800/50 bg-black/20">
+                <div class="max-w-6xl mx-auto px-6">
+                    
+                    <div class="text-center mb-16">
+                        <h2 class="text-3xl md:text-4xl font-bold mb-4">Our Aim</h2>
+                        <p class="text-zinc-400 max-w-2xl mx-auto">Securing the future of synthetic biology against emerging generative AI threats.</p>
+                    </div>
+
+                    <div class="flex flex-col md:flex-row items-center gap-12 glass-panel p-8 border-bioteal/30 shadow-[0_0_30px_rgba(0,199,183,0.1)]">
+                        <div class="w-full md:w-1/2">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-10 h-10 rounded-lg bg-bioteal/20 flex items-center justify-center border border-bioteal/30">
+                                    <i data-lucide="target" class="text-bioteal w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-white">Proactive Biosecurity</h3>
+                            </div>
+                            <p class="text-zinc-300 leading-relaxed text-sm md:text-base mb-4">
+                                The rapid advancement of Generative AI has outpaced current biosecurity measures. Our mission is to build a proactive, alignment-free defense system that identifies malicious, AI-engineered DNA <strong>before</strong> it can be printed in a lab.
+                            </p>
+                            <p class="text-zinc-300 leading-relaxed text-sm md:text-base">
+                                By shifting our focus from <em>what we already know</em> (legacy databases) to <em>how it was made</em> (structural fingerprinting), we aim to prevent the next generation of synthetic biothreats.
+                            </p>
+                        </div>
+                        <div class="w-full md:w-1/2">
+                            <img src="images (2).jpeg" alt="Proactive Biosecurity" class="rounded-xl border border-zinc-700 shadow-lg object-cover h-64 w-full">
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- SECTION 3: WHAT WE SOLVE -->
+            <section class="w-full pt-20 pb-32 border-t border-zinc-800/50 bg-black/40">
+                <div class="max-w-7xl mx-auto px-6">
+                    
+                    <div class="text-center mb-16">
+                        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-dnablue/30 bg-dnablue/10 text-dnablue text-xs font-bold uppercase mb-4 tracking-wide">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i> Core Capabilities
+                        </div>
+                        <h2 class="text-3xl md:text-4xl font-bold mb-4">Three Critical Problems We Solve</h2>
+                        <p class="text-zinc-400 max-w-2xl mx-auto">How SynDNA overcomes the limitations of legacy biosecurity tools.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        <!-- Problem 1 -->
+                        <div class="glass-card overflow-hidden hover:-translate-y-2 transition duration-300">
+                            <div class="h-48 w-full bg-gradient-to-br from-red-950/50 to-black flex flex-col items-center justify-center border-b border-zinc-800 relative overflow-hidden">
+                                <div class="absolute inset-0 pattern-red opacity-20"></div>
+                                <i data-lucide="scan-line" class="w-16 h-16 text-red-400 mb-3 relative z-10"></i>
+                                <span class="text-red-400 font-mono text-xs tracking-widest relative z-10 bg-black/70 px-3 py-1 rounded border border-red-500/30">ZERO_DAY_DETECTION</span>
+                            </div>
+                            <div class="p-6">
+                                <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center border border-red-500/30 mb-4">
+                                    <i data-lucide="scan-line" class="text-red-400 w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-3">Zero-Day Pathogen Detection</h3>
+                                <p class="text-zinc-400 text-sm leading-relaxed">
+                                    Traditional tools fail entirely against novel AI-generated sequences because they rely on exact database matches. By analyzing statistical anomalies and structural fingerprints, we detect malicious constructs that have never been seen before.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Problem 2 -->
+                        <div class="glass-card overflow-hidden hover:-translate-y-2 transition duration-300">
+                            <div class="h-48 w-full bg-gradient-to-br from-teal-950/50 to-black flex flex-col items-center justify-center border-b border-zinc-800 relative overflow-hidden">
+                                <div class="absolute inset-0 pattern-grid opacity-20"></div>
+                                <i data-lucide="zap" class="w-16 h-16 text-bioteal mb-3 relative z-10"></i>
+                                <span class="text-bioteal font-mono text-xs tracking-widest relative z-10 bg-black/70 px-3 py-1 rounded border border-bioteal/30">ALIGNMENT_FREE_MS</span>
+                            </div>
+                            <div class="p-6">
+                                <div class="w-10 h-10 rounded-lg bg-bioteal/20 flex items-center justify-center border border-bioteal/30 mb-4">
+                                    <i data-lucide="zap" class="text-bioteal w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-3">Alignment-Free Speed</h3>
+                                <p class="text-zinc-400 text-sm leading-relaxed">
+                                    Searching massive global genomic databases using traditional alignment tools (like BLAST) is computationally expensive and slow. Our Machine Learning feature extraction works locally in milliseconds, allowing for massive scalability.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Problem 3 -->
+                        <div class="glass-card overflow-hidden hover:-translate-y-2 transition duration-300">
+                            <div class="h-48 w-full bg-gradient-to-br from-blue-950/50 to-black flex flex-col items-center justify-center border-b border-zinc-800 relative overflow-hidden">
+                                <div class="absolute inset-0 pattern-dots opacity-20"></div>
+                                <i data-lucide="bar-chart-4" class="w-16 h-16 text-dnablue mb-3 relative z-10"></i>
+                                <span class="text-dnablue font-mono text-xs tracking-widest relative z-10 bg-black/70 px-3 py-1 rounded border border-dnablue/30">EXPLAINABLE_MAP</span>
+                            </div>
+                            <div class="p-6">
+                                <div class="w-10 h-10 rounded-lg bg-dnablue/20 flex items-center justify-center border border-dnablue/30 mb-4">
+                                    <i data-lucide="bar-chart-4" class="text-dnablue w-5 h-5"></i>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-3">Explainable Localization</h3>
+                                <p class="text-zinc-400 text-sm leading-relaxed">
+                                    A black-box "yes/no" AI is dangerous in biosecurity. We provide fully interpretable metrics (like RSCU and GC Skew jumps) and map the exact nucleotide coordinates of the suspicious synthetic insert for human review.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB: ANALYZE (SCREENER)                        -->
+        <!-- ============================================== -->
+        <div id="tab-analyze" class="tab-content w-full max-w-7xl mx-auto px-6 pt-32 pb-24 flex-1">
+            <header class="mb-8">
+                <h2 class="text-2xl font-bold text-white mb-2">Sequence Analyzer</h2>
+                <p class="text-zinc-400 text-sm">Upload or paste a FASTA sequence to detect generative AI stealth constructs.</p>
+            </header>
+
+            <div class="glass-card p-6 mb-8">
+                <label class="block text-sm font-medium text-zinc-300 mb-2">Paste Raw FASTA Sequence</label>
+                <textarea id="fasta-input" rows="6" class="w-full bg-black border border-zinc-700 rounded-lg p-4 text-zinc-300 font-mono text-sm focus:border-bioteal focus:ring-1 focus:ring-bioteal outline-none transition mb-6" placeholder=">Sequence_1&#10;ATGCGTACGTAGCTAGCTAGCATCGATCGATC..."></textarea>
+                
+                <div class="flex flex-col md:flex-row gap-6 items-end">
+                    <div class="flex-1 w-full">
+                        <label class="block text-sm font-medium text-zinc-300 mb-2">Select Target Host Organism</label>
+                        <select id="host-select" class="w-full bg-black border border-zinc-700 rounded-lg p-3 text-zinc-300 text-sm focus:border-bioteal outline-none">
+                            <option value="ecoli">Escherichia coli (E. coli)</option>
+                            <option value="yeast">Saccharomyces cerevisiae (Yeast)</option>
+                            <option value="human">Homo sapiens (Human)</option>
+                        </select>
+                    </div>
+                    <button onclick="runAnalysis()" id="analyze-btn" class="w-full md:w-auto bg-bioteal hover:bg-[#00a89a] text-black font-bold py-3 px-8 rounded-lg transition-all flex items-center justify-center gap-2">
+                        <i data-lucide="cpu" class="w-5 h-5"></i> Analyze Sequence
+                    </button>
+                </div>
+            </div>
+
+            <!-- LOADING SPINNER -->
+            <div id="loading-state" class="hidden flex flex-col items-center justify-center py-16">
+                <i data-lucide="loader" class="w-10 h-10 text-bioteal animate-spin mb-4"></i>
+                <p class="text-zinc-400 font-mono text-sm tracking-widest animate-pulse" id="loading-text">CONNECTING TO BACKEND PIPELINE...</p>
+            </div>
+
+            <!-- RESULTS -->
+            <!-- RESULTS -->
+            <div id="results-dashboard" class="hidden flex flex-col gap-6">
+                <div id="verdict-banner" class="flex flex-col md:flex-row justify-between items-center glass-card p-5 threat-glow bg-red-950/20 gap-4">
+                    <div class="flex items-center gap-3">
+                        <div id="verdict-dot" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                        <span id="verdict-text" class="text-white font-bold text-lg">Classification: SYNTHETIC / HIGH RISK</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button onclick="openDNAPopup()" class="bg-dnablue hover:bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg text-xs tracking-wider uppercase transition flex items-center gap-2">
+                            <i data-lucide="box" class="w-4 h-4"></i> View Vertical Ladder DNA Model (Scrollable)
+                        </button>
+                        <div id="verdict-score" class="text-red-400 font-mono font-bold text-xl">Anomaly Score: 94%</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="flex flex-col gap-6">
+                        <div class="glass-card p-5">
+                            <p class="text-zinc-400 text-sm mb-1">Sequence Length</p>
+                            <h3 class="text-2xl font-bold text-white"><span id="res-length">0</span> <span class="text-sm font-normal text-zinc-400">bp</span></h3>
+                        </div>
+                        <div class="glass-card p-5">
+                            <p class="text-zinc-400 text-sm mb-1">RSCU Codon Bias</p>
+                            <h3 id="res-bias" class="text-2xl font-bold text-red-400">Evaluated</h3>
+                        </div>
+                    </div>
+                    <div class="md:col-span-2 glass-card p-6">
+                        <h2 class="text-lg font-semibold text-white flex items-center gap-2 mb-6">
+                            <i data-lucide="activity" class="w-5 h-5 text-bioteal"></i> Suspicious Regions Mapping
+                        </h2>
+                        <div class="flex justify-between text-xs text-zinc-500 font-mono mb-2">
+                            <span>0 bp</span><span id="res-length-max">0 bp</span>
+                        </div>
+                        <div class="dna-track mb-4"><div class="dna-flagged" id="visual-track-flag" title="Suspicious Insert"></div></div>
+                        <div class="text-sm text-zinc-400">
+                            <span class="inline-block w-3 h-3 bg-red-500 rounded-full mr-1"></span> Flagged Region: <strong class="text-white" id="flagged-coords">Backend XGBoost Analysis</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BIOINFORMATICS REPORTS & GRAPHS SECTION -->
+                
+<div class="glass-card p-6 border-bioteal/30">
+    <h3 class="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+        <i data-lucide="file-spreadsheet" class="w-5 h-5 text-bioteal"></i> Bioinformatics Reports & Visual Graphs
+    </h3>
+    <p class="text-xs text-zinc-400 mb-4">Download the full feature extraction matrix sheet or inspect the generated linear restriction & ORF map graph.</p>
+    
+    <!-- ON-SCREEN TABULAR PREVIEW CONTAINER -->
+    <div class="mb-6 overflow-x-auto max-h-64 border border-zinc-800 rounded-lg bg-black/40">
+        <table id="feature-table" class="w-full text-left text-xs text-zinc-300 font-mono">
+            <tr><td class="p-4 text-center text-zinc-500">Run an analysis to preview the feature matrix table here...</td></tr>
+        </table>
+    </div>
+
+    <div class="flex flex-wrap gap-4 items-center">
+        <a id="download-csv-btn" href="#" target="_blank" class="hidden bg-bioteal hover:bg-[#00a89a] text-black font-semibold px-5 py-2.5 rounded-lg text-xs tracking-wider uppercase transition flex items-center gap-2">
+            <i data-lucide="download" class="w-4 h-4"></i> Download Feature CSV / Data Sheet
+        </a>
+        <button onclick="openGraphModal()" id="view-graph-btn" class="hidden bg-zinc-800 hover:bg-zinc-700 text-white font-semibold px-5 py-2.5 rounded-lg text-xs tracking-wider uppercase transition flex items-center gap-2 border border-zinc-700">
+            <i data-lucide="image" class="w-4 h-4 text-bioteal"></i> View Linear DNA Map Graph
+        </button>
+    </div>
+</div>
+
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB: HISTORY (DYNAMICALLY UPDATED)             -->
+        <!-- ============================================== -->
+        <div id="tab-history" class="tab-content w-full max-w-7xl mx-auto px-6 pt-32 pb-24 flex-1">
+            <header class="mb-8 flex justify-between items-center">
+                <div>
+                    <h2 class="text-2xl font-bold text-white mb-2">Analysis History</h2>
+                    <p class="text-zinc-400 text-sm">Live log of all sequences tested during your session.</p>
+                </div>
+                <button onclick="clearHistory()" class="text-xs font-semibold uppercase tracking-wider px-4 py-2 border border-red-500/30 rounded-lg hover:border-red-500 transition text-red-400 bg-red-950/20 hover:bg-red-900/30">
+                    Clear History
+                </button>
+            </header>
+            <div class="glass-card overflow-x-auto">
+                <table class="w-full text-left border-collapse min-w-[800px]">
+                    <thead>
+                        <tr class="bg-zinc-900/50 text-zinc-400 text-sm border-b border-zinc-800">
+                            <th class="p-4 font-medium">Date / Time</th>
+                            <th class="p-4 font-medium">Sequence ID</th>
+                            <th class="p-4 font-medium">Host</th>
+                            <th class="p-4 font-medium">Length</th>
+                            <th class="p-4 font-medium">Verdict</th>
+                            <th class="p-4 font-medium">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body" class="text-sm text-zinc-300">
+                        <!-- Dynamically populated rows will appear here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB: GUIDE                                     -->
+        <!-- ============================================== -->
+        <div id="tab-docs" class="tab-content w-full max-w-5xl mx-auto px-6 pt-32 pb-24 flex-1">
+            <header class="mb-12 text-center md:text-left">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-bioteal/30 bg-bioteal/10 text-bioteal text-xs font-bold uppercase mb-4 tracking-wide">
+                    <i data-lucide="book-open" class="w-4 h-4"></i> Official Manual
+                </div>
+                <h2 class="text-3xl font-bold text-white mb-2">User Guide</h2>
+                <p class="text-zinc-400 text-sm">Everything you need to know to operate the SynDNA engine.</p>
+            </header>
+
+            <div class="flex flex-col gap-8">
+                <!-- Section 1: Quick Start -->
+                <div class="glass-card p-8">
+                    <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                        <i data-lucide="play-circle" class="text-bioteal w-6 h-6"></i> Quick Start
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="bg-black/50 border border-zinc-800 rounded-lg p-5">
+                            <div class="text-bioteal font-mono text-lg font-bold mb-2">01</div>
+                            <h4 class="text-white font-semibold mb-2">Input Sequence</h4>
+                            <p class="text-zinc-400 text-sm leading-relaxed">Paste your raw nucleotide code into the analyzer text box. Ensure it contains only valid A, T, C, G characters.</p>
+                        </div>
+                        <div class="bg-black/50 border border-zinc-800 rounded-lg p-5">
+                            <div class="text-bioteal font-mono text-lg font-bold mb-2">02</div>
+                            <h4 class="text-white font-semibold mb-2">Select Target Host</h4>
+                            <p class="text-zinc-400 text-sm leading-relaxed">Choose the intended host organism (e.g., E. coli). Our ML model uses this baseline to calculate codon bias anomalies.</p>
+                        </div>
+                        <div class="bg-black/50 border border-zinc-800 rounded-lg p-5">
+                            <div class="text-bioteal font-mono text-lg font-bold mb-2">03</div>
+                            <h4 class="text-white font-semibold mb-2">Run Analysis</h4>
+                            <p class="text-zinc-400 text-sm leading-relaxed">Click analyze. The engine will extract features, calculate RSCU, and deploy the Random Forest model to flag synthetic inserts.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Supported Formats -->
+                <div class="glass-card p-8">
+                    <h3 class="text-xl font-bold text-white mb-4 flex items-center gap-3">
+                        <i data-lucide="file-code-2" class="text-bioteal w-6 h-6"></i> Supported Formats
+                    </h3>
+                    <p class="text-zinc-300 text-sm leading-relaxed mb-4">
+                        Currently, the screener accepts raw nucleotide sequences in standard <strong>FASTA format</strong>. The header line (starting with <code>&gt;</code>) is optional but recommended for logging purposes.
+                    </p>
+                    <div class="bg-black border border-zinc-800 rounded-lg p-4 font-mono text-xs text-zinc-400 overflow-x-auto">
+                        <span class="text-bioteal">&gt;Sample_Sequence_001</span><br>
+                        ATGCGTACGTAGCTAGCTAGCATCGATCGATC...<br>
+                        CGTACGATCGTACGATCGTACGATCGTACGAT<br>
+                    </div>
+                </div>
+
+                <!-- Section 3: Interpreting Results -->
+                <div class="glass-card p-8">
+                    <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                        <i data-lucide="activity" class="text-bioteal w-6 h-6"></i> Interpreting Results
+                    </h3>
+                    <div class="space-y-4 text-sm">
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-green-500/5 border border-green-500/20">
+                            <div class="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center shrink-0 border border-green-500/30">
+                                <span class="text-green-400 font-bold font-mono">L</span>
+                            </div>
+                            <div>
+                                <strong class="text-green-400 text-base block mb-1">0% - 30% (Natural / Low Risk)</strong>
+                                <p class="text-zinc-400">The sequence matches the expected genomic complexity of the host. No significant synthetic patterns detected.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                            <div class="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center shrink-0 border border-yellow-500/30">
+                                <span class="text-yellow-400 font-bold font-mono">M</span>
+                            </div>
+                            <div>
+                                <strong class="text-yellow-400 text-base block mb-1">31% - 75% (Suspicious / Medium Risk)</strong>
+                                <p class="text-zinc-400">Contains moderate codon optimization, minor GC skew anomalies, or unusual restriction sites. Manual review advised.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-start gap-4 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
+                            <div class="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center shrink-0 border border-red-500/30">
+                                <span class="text-red-400 font-bold font-mono">H</span>
+                            </div>
+                            <div>
+                                <strong class="text-red-400 text-base block mb-1">76% - 100% (Synthetic / High Risk)</strong>
+                                <p class="text-zinc-400">High probability of lab manipulation or AI generation. Cloning scars, unnatural GC boundaries, and abnormal RSCU detected.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- TAB: ABOUT US                                  -->
+        <!-- ============================================== -->
+        <div id="tab-about" class="tab-content w-full max-w-6xl mx-auto px-6 pt-32 pb-24 flex-1">
+            <header class="mb-12 text-center">
+                <h2 class="text-3xl font-bold text-white mb-4">Meet the Team</h2>
+                <p class="text-zinc-400 text-sm max-w-2xl mx-auto">Hackathon Project 2026. Built to close the dangerous loophole in DNA biosecurity.</p>
+            </header>
+            
+            <div class="flex flex-wrap justify-center gap-6">
+                <!-- Vinayak -->
+                <div class="glass-card p-6 text-left w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] flex flex-col hover:-translate-y-1 transition duration-300">
+                    <div class="w-16 h-16 bg-zinc-800 rounded-full mb-4 border-2 border-bioteal flex items-center justify-center shrink-0">
+                        <i data-lucide="database" class="w-7 h-7 text-zinc-400"></i>
+                    </div>
+                    <h3 class="text-white font-bold text-lg mb-1">Vinayak</h3>
+                    <p class="text-bioteal text-xs font-mono mb-4 uppercase tracking-wider">Data Lead</p>
+                    <p class="text-zinc-400 text-sm leading-relaxed">
+                        Scrape and curate FASTA dataset. Collect 500+ natural sequences from NCBI GenBank and 500+ synthetic/engineered vectors from Addgene & iGEM. Export clean CSV with target labels (0 = Natural, 1 = Synthetic).
+                    </p>
+                </div>
+
+                <!-- Angshuman -->
+                <div class="glass-card p-6 text-left w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] flex flex-col hover:-translate-y-1 transition duration-300">
+                    <div class="w-16 h-16 bg-zinc-800 rounded-full mb-4 border-2 border-dnablue flex items-center justify-center shrink-0">
+                        <i data-lucide="microscope" class="w-7 h-7 text-zinc-400"></i>
+                    </div>
+                    <h3 class="text-white font-bold text-lg mb-1">Angshuman</h3>
+                    <p class="text-dnablue text-xs font-mono mb-4 uppercase tracking-wider">Bioinformatics</p>
+                    <p class="text-zinc-400 text-sm leading-relaxed">
+                        Build feature extraction functions using Biopython. Implement k-mer frequency analysis (k=3, 4), Codon Adaptation Index (CAI), GC skew calculations, and restriction scar keyword pattern matching.
+                    </p>
+                </div>
+
+                <!-- Ronak -->
+                <div class="glass-card p-6 text-left w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] flex flex-col hover:-translate-y-1 transition duration-300">
+                    <div class="w-16 h-16 bg-zinc-800 rounded-full mb-4 border-2 border-purple-500 flex items-center justify-center shrink-0">
+                        <i data-lucide="brain-circuit" class="w-7 h-7 text-zinc-400"></i>
+                    </div>
+                    <h3 class="text-white font-bold text-lg mb-1">Ronak</h3>
+                    <p class="text-purple-400 text-xs font-mono mb-4 uppercase tracking-wider">ML Engineer</p>
+                    <p class="text-zinc-400 text-sm leading-relaxed">
+                        Setup XGBoost pipeline with standard preprocessing scripts. Prepare cross-validation splits and define baseline evaluation metrics (ROC-AUC, F1-score).
+                    </p>
+                </div>
+
+                <!-- Krishna -->
+                <div class="glass-card p-6 text-left w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] flex flex-col hover:-translate-y-1 transition duration-300">
+                    <div class="w-16 h-16 bg-zinc-800 rounded-full mb-4 border-2 border-pink-500 flex items-center justify-center shrink-0">
+                        <i data-lucide="layout-dashboard" class="w-7 h-7 text-zinc-400"></i>
+                    </div>
+                    <h3 class="text-white font-bold text-lg mb-1">Krishna</h3>
+                    <p class="text-pink-400 text-xs font-mono mb-4 uppercase tracking-wider">Frontend Lead</p>
+                    <p class="text-zinc-400 text-sm leading-relaxed">
+                        Build static Streamlit prototype. Create dashboard layout with FASTA file drag-and-drop uploader, sample sequence selector buttons, and mock summary metric cards.
+                    </p>
+                </div>
+
+                <!-- Vatsal -->
+                <div class="glass-card p-6 text-left w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)] flex flex-col hover:-translate-y-1 transition duration-300">
+                    <div class="w-16 h-16 bg-zinc-800 rounded-full mb-4 border-2 border-green-500 flex items-center justify-center shrink-0">
+                        <i data-lucide="server" class="w-7 h-7 text-zinc-400"></i>
+                    </div>
+                    <h3 class="text-white font-bold text-lg mb-1">Vatsal</h3>
+                    <p class="text-green-400 text-xs font-mono mb-4 uppercase tracking-wider">Backend Lead</p>
+                    <p class="text-zinc-400 text-sm leading-relaxed">
+                        Create basic FastAPI framework to route incoming FASTA text inputs through sequence parsers and return dummy JSON prediction outputs to Streamlit.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ============================================== -->
+    <!-- 3D DNA POPUP MODAL CONTAINER                   -->
+    <!-- ============================================== -->
+    <div id="dna-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md hidden">
+        <div class="glass-panel w-full max-w-4xl mx-4 overflow-hidden border border-bioteal/40 shadow-[0_0_50px_rgba(0,199,183,0.2)]">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+                <div class="flex items-center gap-3">
+                    <i data-lucide="dna" class="text-bioteal w-6 h-6"></i>
+                    <div>
+                        <h3 class="text-white font-bold text-base">3D DNA Double Helix Visualizer (Base Letters Active)</h3>
+                        <p class="text-zinc-400 text-xs font-mono" id="modal-subtitle">Rendered from sequence input</p>
+                    </div>
+                </div>
+                <button onclick="closeDNAPopup()" class="text-zinc-400 hover:text-white p-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <!-- Canvas Mount Area -->
+            <div id="modal-canvas-container" class="w-full h-[550px] relative bg-black"></div>
+        </div>
+    </div>
+    <!-- ================= GRAPH PREVIEW MODAL ================= -->
+    <div id="graph-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md hidden">
+        <div class="glass-panel w-full max-w-4xl mx-4 overflow-hidden border border-bioteal/40 shadow-[0_0_50px_rgba(0,199,183,0.2)]">
+            <div class="flex justify-between items-center px-6 py-4 border-b border-zinc-800 bg-zinc-900/50">
+                <h3 class="text-white font-bold text-base flex items-center gap-2">
+                    <i data-lucide="line-chart" class="text-bioteal w-5 h-5"></i> Linear DNA Map & GC Content Track
+                </h3>
+                <button onclick="closeGraphModal()" class="text-zinc-400 hover:text-white p-2 rounded-lg bg-zinc-800/50 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="p-6 bg-black flex justify-center items-center">
+                <img id="graph-img-preview" src="" alt="DNA Map Graph" class="max-w-full rounded-lg border border-zinc-800 shadow-lg">
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer applies to all pages -->
+    <footer class="w-full border-t border-zinc-900 bg-black/60 py-6 z-10 relative mt-auto">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center text-xs text-zinc-500">
+            <div>SynDNA Analytics &copy; 2026</div>
+            <div class="flex gap-6 mt-4 sm:mt-0 font-mono">
+                <span>EXPLAINABLE OUTPUTS</span>
+                <span>NUCLEOTIDE LEVEL LOCALIZATION</span>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script>
+    // Modal Toggles for Graph Preview
+    function renderCSVTable(csvText) {
+        const lines = csvText.trim().split('\n');
+        if (lines.length === 0) return;
+        
+        let html = '';
+        lines.forEach((line, index) => {
+            const cols = line.split(',');
+            html += `<tr class="border-b border-zinc-800 ${index === 0 ? 'bg-zinc-900/90 text-bioteal font-bold sticky top-0' : 'hover:bg-zinc-800/30'}">`;
+            cols.forEach(col => {
+                const tag = index === 0 ? 'th' : 'td';
+                html += `<${tag} class="p-2.5 whitespace-nowrap">${col.replace(/"/g, '')}</${tag}>`;
+            });
+            html += `</tr>`;
+        });
+        document.getElementById('feature-table').innerHTML = html;
+    }
+    function openGraphModal() {
+        document.getElementById('graph-modal').classList.remove('hidden');
+    }
+    function closeGraphModal() {
+        document.getElementById('graph-modal').classList.add('hidden');
+    }
+    lucide.createIcons();
+
+    // Single Page App (SPA) Tab Switching Logic
+    function switchTab(tabName) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+        document.getElementById('tab-' + tabName).classList.add('active');
+        document.getElementById('nav-' + tabName).classList.add('active');
+
+        window.scrollTo(0, 0);
+    }
+
+    let currentCleanedSequence = "ATGCGTACGTTAGCCGTAAGCTAGCTTGACCGGATCAAGCT";
+    // Load history from localStorage on startup, or start fresh if none exists
+    let analysisHistory = JSON.parse(localStorage.getItem('synDNA_history')) || [];
+
+    function renderHistoryTable() {
+        const tbody = document.getElementById('history-table-body');
+        if (!tbody) return;
+
+        if (analysisHistory.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-zinc-500 font-mono text-xs">NO ANALYSIS HISTORY RECORDED YET.</td></tr>`;
+            return;
+        }
+
+        let html = '';
+        analysisHistory.forEach((item, index) => {
+            let badgeClass = item.verdict === 'SYNTHETIC' 
+                ? 'bg-red-500/20 text-red-400 border-red-500/30' 
+                : item.verdict === 'SUSPICIOUS' 
+                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                : 'bg-green-500/20 text-green-400 border-green-500/30';
+            
+            let scoreColor = item.verdict === 'SYNTHETIC' ? 'text-red-400' : item.verdict === 'SUSPICIOUS' ? 'text-yellow-400' : 'text-green-400';
+
+            html += `
+                <tr class="history-row border-b border-zinc-800 hover:bg-zinc-800/30 transition cursor-pointer" data-index="${index}" title="Click to reload this analysis">
+                    <td class="p-4">${item.time}</td>
+                    <td class="p-4 font-mono text-xs text-bioteal">${item.id}</td>
+                    <td class="p-4">${item.host}</td>
+                    <td class="p-4">${item.length}</td>
+                    <td class="p-4"><span class="${badgeClass} px-2 py-1 rounded text-xs font-bold border">${item.verdict}</span></td>
+                    <td class="p-4 font-mono ${scoreColor}">${item.score}</td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+
+        // Programmatically attach click listeners to each generated row
+        document.querySelectorAll('.history-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const idx = parseInt(row.getAttribute('data-index'), 10);
+                reloadHistory(idx);
+            });
+        });
+    }
+
+    function reloadHistory(index) {
+        const item = analysisHistory[index];
+        if (!item || !item.sequence) return;
+
+        // 1. Populate textarea and host selector with saved history data
+        document.getElementById('fasta-input').value = item.sequence;
+        const hostSelect = document.getElementById('host-select');
+        if (hostSelect) hostSelect.value = item.host || 'ecoli';
+
+        // 2. Switch back to the analyze tab
+        switchTab('analyze');
+
+        // 3. Automatically re-run the analysis
+        runAnalysis();
+    }
+
+    function clearHistory() {
+        analysisHistory = [];
+        localStorage.removeItem('synDNA_history'); // Wipes storage completely
+        renderHistoryTable();
+    }
+
+    function cleanSequence(raw) {
+        return raw.toUpperCase().replace(/[^ATGC]/g, "");
+    }
+
+    async function runAnalysis() {
+        const rawInput = document.getElementById('fasta-input').value;
+        if (!rawInput) { 
+            alert("Please paste a FASTA sequence first!"); 
+            return; 
+        }
+
+        let seqId = "SEQ-" + Math.floor(1000 + Math.random() * 9000);
+        const lines = rawInput.trim().split('\n');
+        if (lines.length > 0 && lines[0].startsWith('>')) {
+            seqId = lines[0].substring(1).trim().split(' ')[0] || seqId;
+        }
+
+        const cleanSequence = lines
+            .filter(line => !line.trim().startsWith('>'))
+            .join('')
+            .toUpperCase()
+            .replace(/[^ATGC]/g, "");
+
+        if (!cleanSequence) {
+            alert("Error: No valid DNA sequence found!");
+            return;
+        }
+        currentCleanedSequence = cleanSequence;
+
+        const hostOrg = document.getElementById('host-select').value;
+        const seqLen = cleanSequence.length;
+
+        // UI Loading State
+        const analyzeBtn = document.getElementById('analyze-btn');
+        if (analyzeBtn) {
+            analyzeBtn.style.opacity = '0.5';
+            analyzeBtn.innerText = 'Analyzing...';
+        }
+        document.getElementById('results-dashboard').classList.add('hidden');
+        document.getElementById('loading-state').classList.remove('hidden');
+
+        try {
+            const response = await fetch('http://localhost:8000/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sequence: cleanSequence, host: hostOrg })
+            });
+            const data = await response.json();
+
+            const verdict = data.verdict || data.classification || "SYNTHETIC";
+            const rawScore = data.anomaly_score !== undefined ? data.anomaly_score : (data.score || 0.94);
+            const anomalyScorePct = (rawScore <= 1 ? rawScore * 100 : rawScore).toFixed(1);
+            
+            const isSynthetic = Number(anomalyScorePct) >= 30.0;
+            const bannerText = isSynthetic ? "SYNTHETIC / HIGH RISK" : "NATURAL / LOW RISK";
+            
+            const bannerContainer = document.getElementById('verdict-banner');
+            if (bannerContainer) {
+                bannerContainer.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-3 h-3 rounded-full ${isSynthetic ? 'bg-red-500 animate-pulse' : 'bg-green-500'}"></div>
+                        <span class="text-white font-bold text-lg">Classification: ${bannerText}</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button onclick="openDNAPopup()" class="bg-dnablue hover:bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg text-xs tracking-wider uppercase transition flex items-center gap-2">
+                            <i data-lucide="box" class="w-4 h-4"></i> View Vertical Ladder DNA Model (Scrollable)
+                        </button>
+                        <div id="verdict-score" class="${isSynthetic ? 'text-red-400' : 'text-green-400'} font-mono font-bold text-xl">Anomaly Score: ${anomalyScorePct}%</div>
+                    </div>
+                `;
+                bannerContainer.className = `flex flex-col md:flex-row justify-between items-center glass-card p-5 gap-4 border ${isSynthetic ? 'bg-red-950/20 border-red-500/50 threat-glow' : 'bg-green-950/20 border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.3)]'}`;
+            }
+            
+            const reportRes = await fetch('http://localhost:8000/generate-reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sequence: cleanSequence, host: hostOrg })
+            });
+            const reportData = await reportRes.json();
+
+            if (reportData && reportData.success) {
+                const csvUrl = `http://localhost:8000${reportData.csv_download_url}`;
+                const csvBtn = document.getElementById('download-csv-btn');
+                if (csvBtn) { 
+                    csvBtn.href = csvUrl;
+                    csvBtn.classList.remove('hidden');
+                }
+                try {
+                    const csvRes = await fetch(csvUrl);
+                    const csvText = await csvRes.text();
+                    renderCSVTable(csvText);
+                } catch (e) {
+                    console.error("Error loading CSV preview table:", e);
+                }
+
+                if (reportData.plot_download_url) {
+                    const graphImg = document.getElementById('graph-img-preview');
+                    if (graphImg) graphImg.src = `http://localhost:8000${reportData.plot_download_url}`;
+                    const viewGraphBtn = document.getElementById('view-graph-btn');
+                    if (viewGraphBtn) viewGraphBtn.classList.remove('hidden');
+                }
+            }
+
+            const lengthDisplay = document.getElementById('res-length');
+            if (lengthDisplay) {
+                lengthDisplay.innerText = seqLen.toLocaleString();
+            }
+
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('results-dashboard').classList.remove('hidden');
+
+            const now = new Date();
+            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            analysisHistory.unshift({
+                time: `Today, ${timeString}`,
+                id: seqId,
+                host: hostOrg,
+                length: `${seqLen.toLocaleString()} bp`,
+                verdict: verdict,
+                score: `${anomalyScorePct}%`,
+                sequence: rawInput
+            });
+
+            localStorage.setItem('synDNA_history', JSON.stringify(analysisHistory));
+            renderHistoryTable();
+
+        } catch (err) {
+            document.getElementById('loading-state').classList.add('hidden');
+            alert("Error connecting to backend: " + err.message);
+        } finally {
+            const resetBtn = document.getElementById('analyze-btn');
+            if (resetBtn) {
+                resetBtn.style.opacity = '1';
+                resetBtn.innerHTML = `<i data-lucide="cpu" class="w-5 h-5"></i> Analyze Sequence`;
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        renderHistoryTable();
+    });
+
+    // ----------------------------------------------------
+    // 3D DNA POPUP VIEWER LOGIC (Multi-Directional Rotation & Orbit Controls)
+    // ----------------------------------------------------
+    let modalRenderer = null;
+    let modalAnimId = null;
+    let modalControls = null;
+
+    function makeBaseSprite(letter, color) {
+        const size = 128;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 72px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(letter, size / 2, size / 2 + 4);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(1.6, 1.6, 1.6);
+        return sprite;
+    }
+
+    const DNA_3D_MAX_BASES = 150; // rendering every base as 3D meshes doesn't scale past this
+
+    function openDNAPopup() {
+        const modal = document.getElementById('dna-modal');
+        modal.classList.remove('hidden');
+
+        const total = currentCleanedSequence.length;
+        const shown = Math.min(total, DNA_3D_MAX_BASES);
+        const truncNote = total > DNA_3D_MAX_BASES
+            ? ` (showing first ${shown} bases for 3D clarity)`
+            : '';
+        document.getElementById('modal-subtitle').innerText =
+            `${total} bases${truncNote} · drag in any direction to rotate · scroll to zoom`;
+
+        setTimeout(() => {
+            initModalDNA(currentCleanedSequence.slice(0, DNA_3D_MAX_BASES));
+        }, 50);
+    }
+
+    function closeDNAPopup() {
+        const modal = document.getElementById('dna-modal');
+        modal.classList.add('hidden');
+        if (modalAnimId) cancelAnimationFrame(modalAnimId);
+        if (modalRenderer) {
+            modalRenderer.dispose();
+            modalRenderer = null;
+        }
+        document.getElementById('modal-canvas-container').innerHTML = '';
+    }
+
+    function initModalDNA(seq) {
+        const container = document.getElementById('modal-canvas-container');
+        container.innerHTML = '';
+
+        const width = container.clientWidth || 800;
+        const height = 550;
+
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.01);
+
+        const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 10000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+        modalRenderer = renderer;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.1);
+        dirLight1.position.set(10, 20, 15);
+        scene.add(dirLight1);
+        const dirLight2 = new THREE.DirectionalLight(0x88aaff, 0.5);
+        dirLight2.position.set(-10, -10, -10);
+        scene.add(dirLight2);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 1.0;
+        modalControls = controls;
+
+        const helixGroup = new THREE.Group();
+        scene.add(helixGroup);
+
+        const baseColorMap = {
+            A: "#ff5252",
+            T: "#4fc3f7",
+            G: "#66bb6a",
+            C: "#ffca28"
+        };
+        const complement = { A: "T", T: "A", G: "C", C: "G" };
+
+        const n = Math.max(seq.length, 1);
+        const pointsPerTurn = 10;
+        const radius = 6;
+        const rise = 0.9;
+        const heightTotal = n * rise;
+
+        const backboneMat1 = new THREE.MeshPhongMaterial({ color: 0x00d4ff, shininess: 100, emissive: 0x002233 });
+        const backboneMat2 = new THREE.MeshPhongMaterial({ color: 0xff00aa, shininess: 100, emissive: 0x330011 });
+        const sphereGeo = new THREE.SphereGeometry(0.35, 16, 16);
+        const rungGeo = new THREE.CylinderGeometry(0.12, 0.12, radius * 2 - 3.2, 8);
+
+        for (let i = 0; i < n; i++) {
+            const angle = (i / pointsPerTurn) * Math.PI * 2;
+            const y = i * rise - heightTotal / 2;
+
+            const x1 = Math.cos(angle) * radius;
+            const z1 = Math.sin(angle) * radius;
+            const x2 = Math.cos(angle + Math.PI) * radius;
+            const z2 = Math.sin(angle + Math.PI) * radius;
+
+            const base1 = seq[i] || 'A';
+            const base2 = complement[base1] || 'T';
+
+            const s1 = new THREE.Mesh(sphereGeo, backboneMat1);
+            s1.position.set(x1, y, z1);
+            helixGroup.add(s1);
+
+            const s2 = new THREE.Mesh(sphereGeo, backboneMat2);
+            s2.position.set(x2, y, z2);
+            helixGroup.add(s2);
+
+            const rungMat = new THREE.MeshPhongMaterial({ color: new THREE.Color(baseColorMap[base1]), shininess: 60 });
+            const rung = new THREE.Mesh(rungGeo, rungMat);
+            rung.position.set((x1 + x2) / 2, y, (z1 + z2) / 2);
+
+            const dir = new THREE.Vector3(x2 - x1, 0, z2 - z1);
+            const quaternion = new THREE.Quaternion();
+            quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+            rung.quaternion.copy(quaternion);
+            helixGroup.add(rung);
+
+            const outwardScale = 1.15;
+            const label1 = makeBaseSprite(base1, baseColorMap[base1]);
+            label1.position.set(x1 * outwardScale, y, z1 * outwardScale);
+            helixGroup.add(label1);
+
+            const label2 = makeBaseSprite(base2, baseColorMap[base2]);
+            label2.position.set(x2 * outwardScale, y, z2 * outwardScale);
+            helixGroup.add(label2);
+        }
+
+        // Fit the camera to BOTH the height of the strand and its (thin) diameter -
+        // using only heightTotal here made long sequences render as an invisible
+        // sliver of pixels, since the helix radius stays fixed at 6 regardless of length.
+        const vFovRad = THREE.MathUtils.degToRad(camera.fov);
+        const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * camera.aspect);
+        const distForHeight = (heightTotal / 2) / Math.tan(vFovRad / 2);
+        const distForWidth = radius / Math.tan(hFovRad / 2);
+        const camDist = Math.max(30, distForHeight, distForWidth) * 1.25; // 25% padding
+        camera.position.set(0, 0, camDist);
+
+        function animateModal() {
+            modalAnimId = requestAnimationFrame(animateModal);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animateModal();
+    }
+
+    // ----------------------------------------------------
+    // 3D BACKGROUND LOGIC (Original Restored)
+    // ----------------------------------------------------
+    const canvas = document.getElementById('webgl-canvas');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);
+    camera.position.z = 45;
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    function buildDNAStrand() {
+        const group = new THREE.Group();
+        const strandLength = 70, radius = 6, step = 0.5, twistRate = 0.18;
+        
+        const materialTeal = new THREE.MeshBasicMaterial({ color: 0x00C7B7 });
+        const materialBlue = new THREE.MeshBasicMaterial({ color: 0x3B82F6 });
+        const materialRung = new THREE.MeshBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.85 });
+        const sphereGeo = new THREE.SphereGeometry(0.35, 8, 8);
+        const rungGeo = new THREE.CylinderGeometry(0.15, 0.15, radius * 2, 8); 
+
+        for (let i = -strandLength / 2; i < strandLength / 2; i++) {
+            const y = i * step, angle = i * twistRate;
+            const x1 = Math.cos(angle) * radius, z1 = Math.sin(angle) * radius;
+            
+            const sphere1 = new THREE.Mesh(sphereGeo, materialTeal);
+            sphere1.position.set(x1, y, z1); group.add(sphere1);
+
+            const x2 = Math.cos(angle + Math.PI) * radius, z2 = Math.sin(angle + Math.PI) * radius;
+            
+            const sphere2 = new THREE.Mesh(sphereGeo, materialBlue);
+            sphere2.position.set(x2, y, z2); group.add(sphere2);
+
+            if (i % 2 === 0) {
+                const rung = new THREE.Mesh(rungGeo, materialRung);
+                rung.position.set(0, y, 0);
+                rung.lookAt(x1, y, z1);
+                rung.rotateX(Math.PI / 2);
+                group.add(rung);
+            }
+        } 
+        return group;
+    }
+
+    const dnaLeft = buildDNAStrand(), dnaRight = buildDNAStrand();
+    scene.add(dnaLeft); scene.add(dnaRight);
+
+    function updateDNAPositions() {
+        const vFOV = (camera.fov * Math.PI) / 180;
+        const height = 2 * Math.tan(vFOV / 2) * camera.position.z;
+        const width = height * camera.aspect;
+        dnaLeft.position.x = -width * 0.35; dnaRight.position.x = width * 0.35;
+    } updateDNAPositions();
+
+    const particleCount = 12000; 
+    const particleGeo = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount * 3; i += 3) {
+        particlePositions[i] = (Math.random() - 0.5) * 800;    
+        particlePositions[i + 1] = (Math.random() - 0.5) * 800; 
+        particlePositions[i + 2] = (Math.random() - 0.5) * 800; 
+    }
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    const particles = new THREE.Points(particleGeo, new THREE.PointsMaterial({ color: 0x00C7B7, size: 0.6, transparent: true, opacity: 0.5 }));
+    scene.add(particles);
+
+    let mouseX = 0, mouseY = 0, targetX = 0, targetY = 0;
+    window.addEventListener('mousemove', (e) => {
+        mouseX = (e.clientX - window.innerWidth / 2) * 0.0005;
+        mouseY = (e.clientY - window.innerHeight / 2) * 0.0005;
+    });
+
+    let scrollY = 0;
+    window.addEventListener('scroll', () => { scrollY = window.scrollY; });
+
+    const clock = new THREE.Clock();
+    function animateBg() {
+        requestAnimationFrame(animateBg);
+        const delta = clock.getDelta();
+
+        dnaLeft.rotation.y += delta * 0.4; dnaRight.rotation.y -= delta * 0.4;
+        particles.rotation.y += delta * 0.03; particles.rotation.x += delta * 0.01; 
+
+        targetX += (mouseX - targetX) * 0.05; targetY += (mouseY - targetY) * 0.05;
+        
+        const baseRotX = Math.PI / 8, baseRotZ = Math.PI / 6;
+        dnaLeft.rotation.x = baseRotX + targetY * 2; dnaLeft.rotation.z = baseRotZ + targetX * 2; dnaLeft.position.y = scrollY * 0.01; 
+        dnaRight.rotation.x = baseRotX + targetY * 2; dnaRight.rotation.z = -baseRotZ - targetX * 2; dnaRight.position.y = scrollY * 0.01; 
+
+        renderer.render(scene, camera);
+    } animateBg();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        updateDNAPositions();
+    });
+</script>
+</body>
+</html>

@@ -1,16 +1,9 @@
 import pandas as pd
 import os
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 DATASET_PATH = r"C:\Users\Ronak Jain\OneDrive\Desktop\Project\SynDNA\dataset\combined_features.csv"
 
-
-# ============================================================
 # LOAD DATASET
-# ============================================================
 
 print("\n" + "=" * 60)
 print("SynDNA - Dataset Inspection")
@@ -24,10 +17,7 @@ if not os.path.exists(DATASET_PATH):
 
 df = pd.read_csv(DATASET_PATH)
 
-
-# ============================================================
 # BASIC INFORMATION
-# ============================================================
 
 print("\n[1] Dataset Shape")
 print("-" * 60)
@@ -36,9 +26,7 @@ print(f"Rows    : {df.shape[0]}")
 print(f"Columns : {df.shape[1]}")
 
 
-# ============================================================
 # COLUMN NAMES
-# ============================================================
 
 print("\n[2] Columns")
 print("-" * 60)
@@ -47,9 +35,8 @@ for i, column in enumerate(df.columns, start=1):
     print(f"{i:3}. {column}")
 
 
-# ============================================================
+
 # DATA TYPES
-# ============================================================
 
 print("\n[3] Data Types")
 print("-" * 60)
@@ -57,9 +44,8 @@ print("-" * 60)
 print(df.dtypes)
 
 
-# ============================================================
+
 # FIRST 5 ROWS
-# ============================================================
 
 print("\n[4] First 5 Rows")
 print("-" * 60)
@@ -67,9 +53,7 @@ print("-" * 60)
 print(df.head().to_string())
 
 
-# ============================================================
 # MISSING VALUES
-# ============================================================
 
 print("\n[5] Missing Values")
 print("-" * 60)
@@ -94,9 +78,8 @@ if missing.sum() == 0:
     print("No missing values found.")
 
 
-# ============================================================
+# 
 # DUPLICATES
-# ============================================================
 
 print("\n[6] Duplicate Rows")
 print("-" * 60)
