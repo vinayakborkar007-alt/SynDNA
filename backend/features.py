@@ -1,353 +1,112 @@
-import itertools
+"""Feature extraction used by the 40-row SynDNA XGBoost model.
+
+These are the same 17 feature columns used to train xgboost_model_40.pkl.
+The extractor intentionally uses only sequence-derived quantities so the API
+can score a new FASTA sequence and can reuse the exact extractor for windows.
+"""
+from __future__ import annotations
+
 from collections import Counter
+import math
+import re
+from typing import Dict, Tuple
 
-import pandas as pd
-
-from dna_pipeline import (
-    calculate_gc_at,
-    shannon_entropy,
-    longest_tandem_repeat,
-    find_orfs,
-)
-
-
-BASES = "ACGT"
+FEATURE_COLUMNS = [
+    "gc_content_pct", "at_content_pct", "n_content_pct",
+    "a_frequency", "t_frequency", "c_frequency", "g_frequency",
+    "gc_skew", "at_skew", "sequence_entropy",
+    "homopolymer_max_length", "homopolymer_mean_length", "repeat_density",
+    "low_complexity_fraction", "gc1_pct", "gc2_pct", "gc3_pct",
+]
 
 
-def _kmer_frequencies(sequence: str, k: int) -> dict:
-    """Return normalized frequency for every possible k-mer."""
-    counts = Counter(
-        sequence[i:i + k]
-        for i in range(len(sequence) - k + 1)
-    )
+def clean_sequence(raw: str) -> str:
+    lines = []
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith(">"):
+            continue
+        lines.append(line)
+    return re.sub(r"[^ATGCN]", "", "".join(lines).upper())
 
-    total = sum(counts.values())
 
-    all_kmers = [
-        "".join(x)
-        for x in itertools.product(BASES, repeat=k)
-    ]
+def entropy(seq: str) -> float:
+    if not seq:
+        return 0.0
+    counts = Counter(seq)
+    n = len(seq)
+    return float(-sum((c / n) * math.log2(c / n) for c in counts.values() if c))
 
-    if total == 0:
-        return {kmer: 0.0 for kmer in all_kmers}
+
+def homopolymer_stats(seq: str) -> Tuple[int, float, int]:
+    if not seq:
+        return 0, 0.0, 0
+    runs = []
+    start = 0
+    for i in range(1, len(seq) + 1):
+        if i == len(seq) or seq[i] != seq[start]:
+            length = i - start
+            if length >= 3:
+                runs.append(length)
+            start = i
+    if not runs:
+        return 0, 0.0, 0
+    return max(runs), float(sum(runs) / len(runs)), len(runs)
+
+
+def low_complexity_fraction(seq: str, window: int = 100, threshold: float = 1.65) -> float:
+    if not seq:
+        return 0.0
+    if len(seq) < window:
+        return 1.0 if entropy(seq) < threshold else 0.0
+    low = 0
+    total = 0
+    for start in range(0, len(seq) - window + 1, window):
+        total += 1
+        if entropy(seq[start:start + window]) < threshold:
+            low += 1
+    return low / total if total else 0.0
+
+
+def gc_by_frame(seq: str) -> Tuple[float, float, float]:
+    out = []
+    for frame in range(3):
+        part = seq[frame::3]
+        out.append(100.0 * sum(b in "GC" for b in part) / len(part) if part else 0.0)
+    return tuple(out)
+
+
+def extract_features(raw: str) -> Dict[str, float]:
+    seq = clean_sequence(raw)
+    if not seq:
+        raise ValueError("No valid DNA bases found in sequence")
+
+    n = len(seq)
+    counts = Counter(seq)
+    a, t, c, g = (counts.get(x, 0) for x in "ATCG")
+    unknown = counts.get("N", 0)
+    gc = g + c
+    at = a + t
+
+    hp_max, hp_mean, hp_count = homopolymer_stats(seq)
+    gc1, gc2, gc3 = gc_by_frame(seq)
 
     return {
-        kmer: counts.get(kmer, 0) / total
-        for kmer in all_kmers
-    }
-
-
-def _codon_frequencies(sequence: str) -> dict:
-    """Return normalized frequency of codons in the sequence."""
-    counts = Counter(
-        sequence[i:i + 3]
-        for i in range(0, len(sequence) - 2, 3)
-        if set(sequence[i:i + 3]).issubset(set(BASES))
-    )
-
-    total = sum(counts.values())
-
-    codons = [
-        "".join(x)
-        for x in itertools.product(BASES, repeat=3)
-    ]
-
-    if total == 0:
-        return {codon: 0.0 for codon in codons}
-
-    return {
-        codon: counts.get(codon, 0) / total
-        for codon in codons
-    }
-
-
-def _gc_position_percentages(sequence: str):
-    """GC percentage at codon positions 1, 2 and 3."""
-    values = []
-
-    for position in range(3):
-        bases = sequence[position::3]
-
-        if not bases:
-            values.append(0.0)
-        else:
-            gc = sum(b in "GC" for b in bases)
-            values.append((gc / len(bases)) * 100)
-
-    return values
-
-
-def _codon_bias_score(sequence: str) -> float:
-    """
-    Simple codon-bias measure.
-
-    Measures how strongly the most frequent codons dominate
-    their respective synonymous codon groups.
-    """
-    codons = [
-        sequence[i:i + 3]
-        for i in range(0, len(sequence) - 2, 3)
-        if set(sequence[i:i + 3]).issubset(set(BASES))
-    ]
-
-    if not codons:
-        return 0.0
-
-    counts = Counter(codons)
-
-    # Synonymous codon groups
-    groups = [
-        ["TTT", "TTC"],
-        ["TTA", "TTG", "CTT", "CTC", "CTA", "CTG"],
-        ["ATT", "ATC", "ATA"],
-        ["ATG"],
-        ["GTT", "GTC", "GTA", "GTG"],
-        ["TCT", "TCC", "TCA", "TCG", "AGT", "AGC"],
-        ["CCT", "CCC", "CCA", "CCG"],
-        ["ACT", "ACC", "ACA", "ACG"],
-        ["GCT", "GCC", "GCA", "GCG"],
-        ["TAT", "TAC"],
-        ["CAT", "CAC"],
-        ["CAA", "CAG"],
-        ["AAT", "AAC"],
-        ["AAA", "AAG"],
-        ["GAT", "GAC"],
-        ["GAA", "GAG"],
-        ["TGT", "TGC"],
-        ["TGG"],
-        ["CGT", "CGC", "CGA", "CGG", "AGA", "AGG"],
-        ["GGT", "GGC", "GGA", "GGG"],
-        ["ACT", "ACC", "ACA", "ACG"],
-    ]
-
-    scores = []
-
-    for group in groups:
-        total = sum(counts[c] for c in group)
-
-        if total == 0 or len(group) == 1:
-            continue
-
-        maximum = max(counts[c] for c in group)
-        scores.append(maximum / total)
-
-    return sum(scores) / len(scores) if scores else 0.0
-
-
-def _codon_adaptation_index(sequence: str) -> float:
-    """
-    Deterministic codon adaptation proxy.
-
-    Uses the relative frequency of the most preferred codon
-    within each synonymous codon family.
-    """
-    codons = [
-        sequence[i:i + 3]
-        for i in range(0, len(sequence) - 2, 3)
-        if set(sequence[i:i + 3]).issubset(set(BASES))
-    ]
-
-    if not codons:
-        return 0.0
-
-    counts = Counter(codons)
-
-    families = [
-        ["TTT", "TTC"],
-        ["TTA", "TTG", "CTT", "CTC", "CTA", "CTG"],
-        ["ATT", "ATC", "ATA"],
-        ["GTT", "GTC", "GTA", "GTG"],
-        ["TCT", "TCC", "TCA", "TCG", "AGT", "AGC"],
-        ["CCT", "CCC", "CCA", "CCG"],
-        ["ACT", "ACC", "ACA", "ACG"],
-        ["GCT", "GCC", "GCA", "GCG"],
-        ["TAT", "TAC"],
-        ["CAT", "CAC"],
-        ["CAA", "CAG"],
-        ["AAT", "AAC"],
-        ["AAA", "AAG"],
-        ["GAT", "GAC"],
-        ["GAA", "GAG"],
-        ["TGT", "TGC"],
-        ["CGT", "CGC", "CGA", "CGG", "AGA", "AGG"],
-        ["GGT", "GGC", "GGA", "GGG"],
-    ]
-
-    values = []
-
-    for family in families:
-        total = sum(counts[c] for c in family)
-
-        if total == 0:
-            continue
-
-        maximum = max(counts[c] for c in family)
-
-        values.append(maximum / total)
-
-    return sum(values) / len(values) if values else 0.0
-
-
-def extract_features(sequence: str, host: str = "unknown") -> dict:
-    """
-    Convert a DNA sequence into the 377 features expected by
-    Member 3's trained XGBoost model.
-    """
-
-    sequence = sequence.strip().upper()
-
-    if not sequence:
-        raise ValueError("Sequence is empty")
-
-    invalid = set(sequence) - set(BASES)
-
-    if invalid:
-        raise ValueError(
-            f"Invalid DNA characters: {''.join(sorted(invalid))}"
-        )
-
-    length = len(sequence)
-
-    # Basic composition
-    a = sequence.count("A")
-    t = sequence.count("T")
-    c = sequence.count("C")
-    g = sequence.count("G")
-
-    gc_pct = ((g + c) / length) * 100 if length else 0.0
-
-    gc_skew = (
-        (g - c) / (g + c)
-        if (g + c) else 0.0
-    )
-
-    at_skew = (
-        (a - t) / (a + t)
-        if (a + t) else 0.0
-    )
-
-    # GC position percentages
-    gc1, gc2, gc3 = _gc_position_percentages(sequence)
-
-    # ORFs
-    orfs = find_orfs(sequence)
-
-    orf_lengths = [
-        len(orf)
-        for orf in orfs
-        if hasattr(orf, "__len__")
-    ]
-
-    average_orf_length = (
-        sum(orf_lengths) / len(orf_lengths)
-        if orf_lengths else 0.0
-    )
-
-    max_orf_length = max(orf_lengths) if orf_lengths else 0.0
-
-    coding_fraction = (
-        sum(orf_lengths) / length
-        if length else 0.0
-    )
-
-    # Homopolymers
-    homopolymer_lengths = []
-
-    current = 1
-
-    for i in range(1, length):
-        if sequence[i] == sequence[i - 1]:
-            current += 1
-        else:
-            homopolymer_lengths.append(current)
-            current = 1
-
-    if length:
-        homopolymer_lengths.append(current)
-
-    max_homopolymer = max(homopolymer_lengths) if homopolymer_lengths else 0
-    mean_homopolymer = (
-        sum(homopolymer_lengths) / len(homopolymer_lengths)
-        if homopolymer_lengths else 0.0
-    )
-
-    c_homopolymer_count = 0
-    current_c = 0
-
-    for base in sequence:
-        if base == "C":
-            current_c += 1
-        else:
-            if current_c > 1:
-                c_homopolymer_count += 1
-            current_c = 0
-
-    if current_c > 1:
-        c_homopolymer_count += 1
-
-    # Repeats
-    repeats = longest_tandem_repeat(sequence)
-
-    if isinstance(repeats, list):
-        repeat_density = (
-            sum(len(str(x)) for x in repeats) / length
-            if length else 0.0
-        )
-    else:
-        repeat_density = 0.0
-
-    # Base feature dictionary
-    features = {
-        "length_bp": length,
-        "gc_content_pct": gc_pct,
-        "n_content_pct": 0.0,
-        "a_frequency": a / length,
-        "t_frequency": t / length,
-        "gc_skew": gc_skew,
-        "at_skew": at_skew,
-        "sequence_entropy": shannon_entropy(sequence),
-        "homopolymer_max_length": max_homopolymer,
-        "homopolymer_mean_length": mean_homopolymer,
-        "homopolymer_C_count": c_homopolymer_count,
-        "repeat_density": repeat_density,
-        "coding_fraction": coding_fraction,
-        "average_orf_length": average_orf_length,
-        "max_orf_length": max_orf_length,
-        "codon_adaptation_index": _codon_adaptation_index(sequence),
-        "codon_bias_score": _codon_bias_score(sequence),
+        "gc_content_pct": 100.0 * gc / n,
+        "at_content_pct": 100.0 * at / n,
+        "n_content_pct": 100.0 * unknown / n,
+        "a_frequency": a / n,
+        "t_frequency": t / n,
+        "c_frequency": c / n,
+        "g_frequency": g / n,
+        "gc_skew": (g - c) / gc if gc else 0.0,
+        "at_skew": (a - t) / at if at else 0.0,
+        "sequence_entropy": entropy(seq),
+        "homopolymer_max_length": hp_max,
+        "homopolymer_mean_length": hp_mean,
+        "repeat_density": (hp_count / n) * 1000.0,
+        "low_complexity_fraction": low_complexity_fraction(seq),
         "gc1_pct": gc1,
         "gc2_pct": gc2,
         "gc3_pct": gc3,
-    }
-
-    # k = 2
-    for kmer, value in _kmer_frequencies(sequence, 2).items():
-        features[f"kmer_{kmer}"] = value
-
-    # k = 3
-    for kmer, value in _kmer_frequencies(sequence, 3).items():
-        features[f"kmer_{kmer}"] = value
-
-    # k = 4
-    for kmer, value in _kmer_frequencies(sequence, 4).items():
-        features[f"kmer_{kmer}"] = value
-
-    # Codons
-    for codon, value in _codon_frequencies(sequence).items():
-        features[f"codon_{codon}"] = value
-
-    # Load exact feature order used by Member 3
-    columns = pd.read_csv("final_feature_columns.csv")["feature"].tolist()
-
-    missing = [column for column in columns if column not in features]
-
-    if missing:
-        raise ValueError(
-            f"Missing model features: {missing}"
-        )
-
-    # Return ONLY the exact 377 model features, in exact order
-    return {
-        column: float(features[column])
-        for column in columns
     }

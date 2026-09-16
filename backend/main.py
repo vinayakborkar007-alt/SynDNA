@@ -1,150 +1,106 @@
-import os
-import tempfile
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
-# Import your pipeline and model modules
-from pipeline import run_prediction
-from dna_pipeline import run_pipeline
+try:
+    from .pipeline import analyze, predict_sequence, map_suspicious_regions
+except ImportError:
+    from pipeline import analyze, predict_sequence, map_suspicious_regions
 
-app = FastAPI(title="SynDNA Biosecurity API", version="1.0")
+BASE = Path(__file__).resolve().parent
+REPORT_DIR = BASE / "reports"
+REPORT_DIR.mkdir(exist_ok=True)
 
-# Enable CORS for frontend communication
+app = FastAPI(title="SynDNA FastAPI", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for local development
+    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:5501", "http://127.0.0.1:5501"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/reports", StaticFiles(directory=REPORT_DIR), name="reports")
 
-class SequenceRequest(BaseModel):
-    sequence: str
+class AnalyzeRequest(BaseModel):
+    sequence: str = Field(..., min_length=1)
     host: str = "ecoli"
 
 @app.get("/")
-def read_root():
-    return {"status": "SynDNA FastAPI Backend is running successfully!"}
+def root():
+    return {"status": "online", "model": "XGBoost", "training_rows": 40, "natural_rows": 20, "synthetic_rows": 20}
 
-def process_prediction(sequence: str, host: str):
-    # --- DEMO OVERRIDE FOR TESTING HIGH-RISK SEQUENCES ---
-    upper_seq = sequence.upper()
-    if "GAATTCGGATCCAAGCTTGCGGCCGC" in upper_seq or upper_seq.count("GAATTC") >= 3:
-        # Force a high-risk synthetic prediction for heavily engineered test constructs
-        result = {
-            "sequence_length": len(sequence),
-            "anomaly_score": 0.94,  # Will scale to 94.0%
-            "classification": "Synthetic / High Risk",
-            "feature_importance": {"EcoRI/BamHI Repetitive Scars": 0.85, "Unnatural Motif Density": 0.78}
-        }
-    else:
-        # Normal machine learning pipeline prediction
-        result = run_prediction(sequence, host)
-    # ----------------------------------------------------
-    
-    seq_len = result.get("sequence_length", len(sequence))
-    anomaly_score = result.get("anomaly_score", 0.0)
-    
-    # Scale anomaly score from decimal (e.g., 0.94) to percentage (94.0) if needed
-    if anomaly_score <= 1.0:
-        anomaly_score = anomaly_score * 100.0
-        
-    classification = result.get("classification", "Natural / Low Risk")
-    
-    # Determine verdict and formatted classification text dynamically
-    class_lower = classification.lower()
-    if "synthetic" in class_lower or "high" in class_lower or anomaly_score > 50.0:
-        verdict = "SYNTHETIC"
-        class_text = "SYNTHETIC / HIGH RISK"
-    else:
-        verdict = "NATURAL"
-        class_text = "NATURAL / LOW RISK"
-        
-    return {
-        "success": True,
-        "sequence_length": seq_len,
-        "anomaly_score": anomaly_score,
-        "verdict": verdict,
-        "classification": class_text,
-        "feature_importance": result.get("feature_importance", {})
-    }
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": "XGBoost", "training_rows": 40}
 
 @app.post("/analyze")
-def analyze_sequence(request: SequenceRequest):
-    """
-    Primary analysis endpoint called by the frontend dashboard.
-    """
+def analyze_endpoint(req: AnalyzeRequest):
     try:
-        return process_prediction(request.sequence, request.host)
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.post("/predict")
-def predict_sequence(request: SequenceRequest):
-    """
-    Core ML prediction endpoint using the trained XGBoost model (alias for /analyze).
-    """
-    try:
-        return process_prediction(request.sequence, request.host)
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        return analyze(req.sequence, req.host)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/generate-reports")
-async def generate_reports(request: SequenceRequest):
-    """
-    Runs the Biopython feature extraction pipeline, generates the CSV data sheet
-    and linear restriction/ORF map plot graph, and returns download URLs.
-    """
-    sequence = request.sequence.strip()
-    if not sequence:
-        return {"success": False, "error": "Empty sequence provided."}
-
+def generate_reports(req: AnalyzeRequest):
     try:
-        # Create a temporary FASTA file for the pipeline
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".fasta", delete=False) as temp_fasta:
-            if not sequence.startswith(">"):
-                temp_fasta.write(">Query_Sequence\n")
-            temp_fasta.write(sequence)
-            temp_fasta_path = temp_fasta.name
+        prediction = predict_sequence(req.sequence)
+        region = map_suspicious_regions(req.sequence)
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:6]
 
-        # Create a temp directory for outputs
-        output_dir = tempfile.mkdtemp(prefix="syn_results_")
-        
-        # Execute the bioinformatics pipeline
-        csv_path, plots_dir = run_pipeline(temp_fasta_path, output_dir, max_plots=1)
+        row = {
+            "sequence_length": prediction["sequence_length"],
+            "host": req.host,
+            **prediction["features"],
+            "classification": prediction["classification"],
+            "anomaly_score": prediction["anomaly_score"],
+            "anomaly_score_pct": prediction["anomaly_score_pct"],
+            "flagged_start": region.get("start"),
+            "flagged_end": region.get("end"),
+            "flagged_region_score": region.get("score"),
+        }
+        csv_name = f"syndna_features_{run_id}.csv"
+        pd.DataFrame([row]).to_csv(REPORT_DIR / csv_name, index=False)
 
-        # Locate generated plot file name
-        plots = os.listdir(plots_dir) if os.path.exists(plots_dir) else []
-        sample_plot_filename = plots[0] if plots else None
+        graph_name = f"syndna_region_map_{run_id}.png"
+        windows = region.get("windows", [])
+        plt.figure(figsize=(12, 4.5))
+        if windows:
+            plt.plot([w["start"] for w in windows], [w["score"] * 100 for w in windows], marker="o", markersize=3)
+        plt.axhline(region.get("threshold", 0.65) * 100, linestyle="--", linewidth=1)
+        plt.ylim(0, 100)
+        plt.xlim(1, prediction["sequence_length"])
+        plt.xlabel("Sequence position (bp)")
+        plt.ylabel("XGBoost synthetic probability (%)")
+        plt.title("SynDNA XGBoost Suspicious-Region Mapping")
+        plt.grid(alpha=0.25)
+        if region.get("start") is not None:
+            plt.axvspan(region["start"], region["end"], alpha=0.18)
+        plt.tight_layout()
+        plt.savefig(REPORT_DIR / graph_name, dpi=160)
+        plt.close()
 
         return {
             "success": True,
-            "csv_filename": os.path.basename(csv_path),
-            "csv_download_url": f"/download/csv/{os.path.basename(output_dir)}",
-            "plot_download_url": f"/download/plot/{os.path.basename(output_dir)}/{sample_plot_filename}" if sample_plot_filename else None
+            "csv_download_url": f"/reports/{csv_name}",
+            "plot_download_url": f"/reports/{graph_name}",
+            "classification": prediction["classification"],
+            "anomaly_score": prediction["anomaly_score"],
+            "flagged_region": region,
         }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.get("/download/csv/{session_id}")
-async def download_csv(session_id: str):
-    """
-    Downloads the generated sequence_features.csv data sheet.
-    """
-    target_dir = os.path.join(tempfile.gettempdir(), session_id)
-    csv_file = os.path.join(target_dir, "sequence_features.csv")
-    if os.path.exists(csv_file):
-        return FileResponse(csv_file, media_type="text/csv", filename="sequence_features.csv")
-    raise HTTPException(status_code=404, detail="CSV file not found")
-
-@app.get("/download/plot/{session_id}/{filename}")
-async def download_plot(session_id: str, filename: str):
-    """
-    Downloads the generated linear DNA map PNG graph.
-    """
-    target_path = os.path.join(tempfile.gettempdir(), session_id, "plots", filename)
-    if os.path.exists(target_path):
-        return FileResponse(target_path, media_type="image/png")
-    raise HTTPException(status_code=404, detail="Plot graph not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
